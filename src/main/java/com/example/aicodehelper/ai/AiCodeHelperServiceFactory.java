@@ -1,5 +1,7 @@
 package com.example.aicodehelper.ai;
 
+import dev.langchain4j.memory.ChatMemory;
+import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.service.AiServices;
 import jakarta.annotation.Resource;
@@ -30,19 +32,32 @@ public class AiCodeHelperServiceFactory {
     @Resource
     private ChatModel qwenChatModel;
 
+
     /**
      * 创建AI代码助手服务实例的Bean工厂方法
      *
-     * 使用@Bond注解声明该方法返回的对象将被注册为Spring容器中的Bean。
-     * 通过AiServices.create()静态方法创建AiCodeHelperService接口的动态代理实例，
+     * 使用@Bean注解声明该方法返回的对象将被注册为Spring容器中的Bean。
+     * 通过AiServices.builder()构建器模式创建AiCodeHelperService接口的动态代理实例，
      * 将服务接口与底层的qwenChatModel进行绑定，实现声明式的服务调用。
      * 这种模式简化了AI服务的使用，开发者只需定义接口即可获得完整的实现。
+     * 同时配置了会话记忆功能，限制最多保存10条消息记录，防止内存无限增长。
      *
-     * @return 返回配置好的AiCodeHelperService实例
+     * @return 返回配置好的AiCodeHelperService实例，该实例具有自然语言处理和代码辅助能力
      * @see AiServices#create(Class, ChatModel) 工具方法用于创建AI服务代理
      */
     @Bean
     public AiCodeHelperService aiCodeHelperService() {
-        return AiServices.create(AiCodeHelperService.class, qwenChatModel);
+        // 创建消息窗口聊天记忆实例，限制最大消息数为10条，用于维护对话上下文
+        ChatMemory chatMemory = MessageWindowChatMemory.withMaxMessages(10);
+        // 使用AiServices构建器创建AiCodeHelperService代理实例
+        AiCodeHelperService aiCodeHelperService = AiServices.builder(AiCodeHelperService.class)
+                // 设置底层使用的聊天模型，即通义千问模型实例
+                .chatModel(qwenChatModel)
+                // 设置聊天记忆组件，用于保持对话的连贯性
+                .chatMemory(chatMemory)
+                // 构建并返回最终的服务代理实例
+                .build();
+        return aiCodeHelperService;
     }
+
 }

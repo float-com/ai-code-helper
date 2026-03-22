@@ -11,4 +11,9 @@ langchain4j:
     dashscope:
       chat-model:
         model-name: qwen3-max
-        api-key: sk-8c4c142669b943d3a2a691d5502243bc
+        api-key: <You API Key here>
+      embedding-model:
+        model-name: text-embedding-v4
+        api-key: <You API Key here>
+
+
