@@ -1,0 +1,48 @@
+package com.example.aicodehelper.ai;
+
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.service.AiServices;
+import jakarta.annotation.Resource;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+/**
+ * AI代码助手服务工厂配置类
+ *
+ * 该配置类负责创建和管理AI代码助手相关服务的Bean实例。
+ * 使用Spring框架的@Configuration注解标记为配置类，允许定义Bean的创建逻辑。
+ * 通过依赖注入获取ChatModel实例，并使用AiServices工具类创建具体的AI服务代理。
+ *
+ * 主要职责：
+ * 1. 管理AiCodeHelperService的生命周期
+ * 2. 将qwenChatModel与具体的服务接口进行绑定
+ * 3. 提供服务实例的集中化创建和配置
+ */
+@Configuration
+public class AiCodeHelperServiceFactory {
+    /**
+     * 注入Qwen聊天模型实例
+     *
+     * 该ChatModel实例由Spring容器管理，包含了与通义千问大模型交互所需的所有配置，
+     * 如API密钥、端点地址、超时设置等。它作为AI服务的基础组件，被用于创建具体的
+     * 服务代理实例，实现自然语言处理和代码辅助功能。
+     */
+    @Resource
+    private ChatModel qwenChatModel;
+
+    /**
+     * 创建AI代码助手服务实例的Bean工厂方法
+     *
+     * 使用@Bond注解声明该方法返回的对象将被注册为Spring容器中的Bean。
+     * 通过AiServices.create()静态方法创建AiCodeHelperService接口的动态代理实例，
+     * 将服务接口与底层的qwenChatModel进行绑定，实现声明式的服务调用。
+     * 这种模式简化了AI服务的使用，开发者只需定义接口即可获得完整的实现。
+     *
+     * @return 返回配置好的AiCodeHelperService实例
+     * @see AiServices#create(Class, ChatModel) 工具方法用于创建AI服务代理
+     */
+    @Bean
+    public AiCodeHelperService aiCodeHelperService() {
+        return AiServices.create(AiCodeHelperService.class, qwenChatModel);
+    }
+}

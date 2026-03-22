@@ -54,6 +54,14 @@
             <version>1.1.0-beta7</version>
         </dependency>
 
+        <!-- langchain4j 核心依赖 -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j</artifactId>
+            <version>1.1.0</version>
+        </dependency>
+
+
     </dependencies>
 
     <build>
