@@ -1,0 +1,14 @@
+spring:
+  application:
+    name: ai-code-helper
+  # 激活本地开发环境配置
+  # 使用 local profile 会加载 application-local.yaml 中的配置
+  profiles:
+    active: local
+
+langchain4j:
+  community:
+    dashscope:
+      chat-model:
+        model-name: qwen3-max
+        api-key: sk-8c4c142669b943d3a2a691d5502243bc
