@@ -1,8 +1,12 @@
 package com.example.aicodehelper.ai;
 
+import com.example.aicodehelper.ai.tools.InterviewQuestionTool;
+import dev.langchain4j.mcp.McpToolProvider;
 import dev.langchain4j.memory.ChatMemory;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.StreamingChatModel;
+import dev.langchain4j.rag.content.retriever.ContentRetriever;
 import dev.langchain4j.service.AiServices;
 import jakarta.annotation.Resource;
 import org.springframework.context.annotation.Bean;
@@ -30,7 +34,15 @@ public class AiCodeHelperServiceFactory {
      * 服务代理实例，实现自然语言处理和代码辅助功能。
      */
     @Resource
-    private ChatModel qwenChatModel;
+    private ChatModel myQwenChatModel;
+
+    @Resource
+    private ContentRetriever contentRetriever;
+
+    @Resource
+    private StreamingChatModel qwenStreamingChatModel;
+
+
 
 
     /**
@@ -46,18 +58,30 @@ public class AiCodeHelperServiceFactory {
      * @see AiServices#create(Class, ChatModel) 工具方法用于创建AI服务代理
      */
     @Bean
-    public AiCodeHelperService aiCodeHelperService() {
+    public AiCodeHelperService aiCodeHelperService(McpToolProvider mcpToolProvider) {
         // 创建消息窗口聊天记忆实例，限制最大消息数为10条，用于维护对话上下文
         ChatMemory chatMemory = MessageWindowChatMemory.withMaxMessages(10);
         // 使用AiServices构建器创建AiCodeHelperService代理实例
         AiCodeHelperService aiCodeHelperService = AiServices.builder(AiCodeHelperService.class)
                 // 设置底层使用的聊天模型，即通义千问模型实例
-                .chatModel(qwenChatModel)
+                .chatModel(myQwenChatModel)
+                // 设置底层使用的流式聊天模型，即通义千问流式模型实例
+                .streamingChatModel(qwenStreamingChatModel)
                 // 设置聊天记忆组件，用于保持对话的连贯性
                 .chatMemory(chatMemory)
+                .chatMemoryProvider(memoryId ->
+                        MessageWindowChatMemory.withMaxMessages(10)) // 每个会话独立存储
+                // 设置内容检索器，用于从知识库中检索相关文档
+                .contentRetriever(contentRetriever)
+                // 设置工具，用于扩展AI的功能
+                .tools(new InterviewQuestionTool())
+                // MCP工具调用
+                .toolProvider(mcpToolProvider)
                 // 构建并返回最终的服务代理实例
                 .build();
         return aiCodeHelperService;
     }
 
 }
+
+

@@ -6,6 +6,11 @@ spring:
   profiles:
     active: local
 
+server:
+  port: 8081
+  servlet:
+    context-path: /api
+
 langchain4j:
   community:
     dashscope:
@@ -15,5 +20,12 @@ langchain4j:
       embedding-model:
         model-name: text-embedding-v4
         api-key: <You API Key here>
+      streaming-chat-model:
+        model-name: qwen-max
+        api-key: <Your Api Key here>
+bigmodel:
+ api-key: <Your Api Key>
+
+
 
 

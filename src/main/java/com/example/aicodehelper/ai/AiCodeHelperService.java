@@ -1,9 +1,16 @@
 package com.example.aicodehelper.ai;
 
+import com.example.aicodehelper.ai.guardrail.SafeInputGuardrail;
+import dev.langchain4j.service.MemoryId;
+import dev.langchain4j.service.Result;
 import dev.langchain4j.service.SystemMessage;
+import dev.langchain4j.service.UserMessage;
+import dev.langchain4j.service.guardrail.InputGuardrails;
+import reactor.core.publisher.Flux;
 
 import java.util.List;
 
+@InputGuardrails(SafeInputGuardrail.class)// 添加输入敏感词检测护轨（当遇到用户输入的敏感词，进行致命错误输出）
 public interface AiCodeHelperService {
 
     /**
@@ -51,6 +58,20 @@ public interface AiCodeHelperService {
      */
     record Report(String name, List<String> suggestionList) {};
 
+    /*
+    * 返回封装后的结果
+    * */
+    @SystemMessage(fromResource = "system-prompt.txt")
+    Result<String> chatWithRag(String userMessage);
+
+    /*
+    * 流式对话
+    * */
+    @SystemMessage(fromResource = "system-prompt.txt")
+    Flux<String> chatStream(@MemoryId int memoryId, @UserMessage String userMessage);
 
 }
+
+
+
 

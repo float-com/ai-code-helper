@@ -61,7 +61,33 @@
             <version>1.1.0</version>
         </dependency>
 
+        <!-- LangChain4j Spring Boot 启动器依赖，用于集成大语言模型功能 -->
+        <!-- 解决 Rag 依赖注入不成功问题 -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-spring-boot-starter</artifactId>
+            <version>1.1.0-beta7</version>
+        </dependency>
 
+        <!-- Jsoup 网络爬虫库依赖，用于解析 HTML 页面和提取数据 -->
+        <dependency>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+            <version>1.20.1</version>
+        </dependency>
+
+        <!-- LangChain4j MCP(Model Context Protocol) 依赖，用于集成模型上下文协议功能 -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-mcp</artifactId>
+            <version>1.1.0-beta7</version>
+        </dependency>
+
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-reactor</artifactId>
+            <version>1.1.0-beta7</version>
+        </dependency>
     </dependencies>
 
     <build>
