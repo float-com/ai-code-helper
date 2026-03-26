@@ -1,6 +1,7 @@
 ### CUSTOM ###
 application-local.yaml
-
+ai-code-helper-frontend/dist
+ai-code-helper-frontend/node_modules
 
 HELP.md
 target/
