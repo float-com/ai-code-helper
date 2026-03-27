@@ -1043,12 +1043,9 @@ mvn spring-boot:run
 
 #### 启动前端
 
-进入前端目录：
-
+进入前端目录：cmd进入命令行，执行以下命令
 ```bash
-cd D:\code\ai-code-helper\ai-code-helper-frontend
-npm.cmd install
-npm.cmd run dev
+npm run dev
 ```
 
 #### 访问地址

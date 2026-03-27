@@ -1,43 +1,58 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import DOMPurify from 'dompurify'
-import MarkdownIt from 'markdown-it'
+import MarkdownRenderer from './components/MarkdownRenderer.vue'
 import { buildChatStreamUrl } from './lib/api'
 
-const markdown = new MarkdownIt({
-  breaks: true,
-  linkify: true
-})
-
-const defaultLinkRenderer =
-  markdown.renderer.rules.link_open ||
-  function renderLink(tokens, idx, options, env, self) {
-    return self.renderToken(tokens, idx, options)
-  }
-
-markdown.renderer.rules.link_open = (tokens, idx, options, env, self) => {
-  const token = tokens[idx]
-  token.attrSet('target', '_blank')
-  token.attrSet('rel', 'noopener noreferrer')
-  return defaultLinkRenderer(tokens, idx, options, env, self)
-}
+const STREAM_FLUSH_INTERVAL = 48
+const AUTO_SCROLL_THRESHOLD = 88
+const DEFAULT_RENDER_WINDOW = 40
 
 const messages = ref([
-  {
-    id: 1,
-    role: 'assistant',
-    content:
-      '你好，我是 AI 编程小助手。你可以问我编程学习路线、项目实战、简历优化和面试准备相关的问题。'
-  }
+  createMessage(
+    'assistant',
+    '你好，我是 AI 编程小助手。你可以继续问我编程学习路线、项目实战、技术答疑和面试辅导相关的问题。'
+  )
 ])
 const inputValue = ref('')
-const isStreaming = ref(false)
 const errorText = ref('')
-const messageListRef = ref(null)
 const currentStream = ref(null)
+const messageListRef = ref(null)
 const memoryId = ref(createMemoryId())
+const connectionState = ref('idle')
+const activeAssistantMessageId = ref(null)
+const renderWindowSize = ref(DEFAULT_RENDER_WINDOW)
+const shouldAutoScroll = ref(true)
 
-const canSend = computed(() => inputValue.value.trim() && !isStreaming.value)
+const rendererRegistry = new Map()
+const streamChunkRegistry = new Map()
+const pendingMessageIds = new Set()
+
+let flushTimerId = null
+let scrollFrameId = null
+
+const canSend = computed(
+  () => Boolean(inputValue.value.trim()) && !isStreamBusy.value
+)
+const isStreamBusy = computed(() =>
+  ['connecting', 'streaming'].includes(connectionState.value)
+)
+const visibleMessages = computed(() => {
+  const start = Math.max(0, messages.value.length - renderWindowSize.value)
+  return messages.value.slice(start)
+})
+const hiddenMessageCount = computed(() =>
+  Math.max(0, messages.value.length - visibleMessages.value.length)
+)
+const connectionStatus = computed(() => {
+  const mapping = {
+    idle: { label: '已就绪', tone: 'idle' },
+    connecting: { label: '连接中', tone: 'connecting' },
+    streaming: { label: '流式输出中', tone: 'streaming' },
+    error: { label: '连接异常', tone: 'error' }
+  }
+
+  return mapping[connectionState.value] || mapping.idle
+})
 
 function createMemoryId() {
   return Math.floor(100000000 + Math.random() * 900000000)
@@ -51,16 +66,54 @@ function createMessage(role, content = '') {
   }
 }
 
-function renderMessage(content) {
-  return DOMPurify.sanitize(markdown.render(content || ''))
+function bindRendererRef(messageId, instance) {
+  if (instance) {
+    rendererRegistry.set(messageId, instance)
+    return
+  }
+
+  rendererRegistry.delete(messageId)
 }
 
-function scrollToBottom() {
-  nextTick(() => {
-    if (messageListRef.value) {
-      messageListRef.value.scrollTop = messageListRef.value.scrollHeight
+function isAtBottom(container) {
+  return (
+    container.scrollHeight - container.scrollTop - container.clientHeight <
+    AUTO_SCROLL_THRESHOLD
+  )
+}
+
+function scheduleScroll(force = false) {
+  if (!force && !shouldAutoScroll.value) {
+    return
+  }
+
+  if (scrollFrameId) {
+    cancelAnimationFrame(scrollFrameId)
+  }
+
+  scrollFrameId = requestAnimationFrame(() => {
+    scrollFrameId = null
+    const container = messageListRef.value
+
+    if (container) {
+      container.scrollTo({
+        top: container.scrollHeight,
+        behavior: force ? 'auto' : 'smooth'
+      })
     }
   })
+}
+
+function clearStreamTimers() {
+  if (flushTimerId) {
+    window.clearTimeout(flushTimerId)
+    flushTimerId = null
+  }
+
+  if (scrollFrameId) {
+    cancelAnimationFrame(scrollFrameId)
+    scrollFrameId = null
+  }
 }
 
 function closeStream() {
@@ -70,57 +123,129 @@ function closeStream() {
   }
 }
 
+function resetStreamState() {
+  activeAssistantMessageId.value = null
+  connectionState.value = 'idle'
+}
+
+function queueMessageChunk(messageId, chunk) {
+  if (!chunk) {
+    return
+  }
+
+  const queue = streamChunkRegistry.get(messageId) || []
+  queue.push(chunk)
+  streamChunkRegistry.set(messageId, queue)
+  pendingMessageIds.add(messageId)
+
+  if (!flushTimerId) {
+    flushTimerId = window.setTimeout(() => flushPendingChunks(), STREAM_FLUSH_INTERVAL)
+  }
+}
+
+function flushPendingChunks(forceScroll = false) {
+  if (flushTimerId) {
+    window.clearTimeout(flushTimerId)
+    flushTimerId = null
+  }
+
+  for (const messageId of pendingMessageIds) {
+    const chunks = streamChunkRegistry.get(messageId)
+    const message = messages.value.find((item) => item.id === messageId)
+    const renderer = rendererRegistry.get(messageId)
+
+    if (!chunks?.length || !message) {
+      continue
+    }
+
+    const mergedChunk = chunks.join('')
+    message.content += mergedChunk
+    renderer?.appendChunk(mergedChunk)
+    chunks.length = 0
+  }
+
+  pendingMessageIds.clear()
+  scheduleScroll(forceScroll)
+}
+
+function finishStream(assistantMessage, errored = false) {
+  flushPendingChunks(true)
+  closeStream()
+  activeAssistantMessageId.value = null
+
+  if (errored && !assistantMessage.content.trim()) {
+    assistantMessage.content =
+      '本次流式响应已中断，请检查后端服务、CORS 配置以及 SSE 编码。'
+    const renderer = rendererRegistry.get(assistantMessage.id)
+    renderer?.replaceAll(assistantMessage.content)
+    errorText.value = '连接已关闭，未收到有效内容。'
+    connectionState.value = 'error'
+    return
+  }
+
+  errorText.value = ''
+  connectionState.value = 'idle'
+}
+
 function resetChat() {
   closeStream()
+  clearStreamTimers()
+  streamChunkRegistry.clear()
+  pendingMessageIds.clear()
   memoryId.value = createMemoryId()
   messages.value = [
-    {
-      id: Date.now(),
-      role: 'assistant',
-      content: '新的会话已经创建。继续提问，我会基于当前会话上下文实时回答。'
-    }
+    createMessage(
+      'assistant',
+      '新的会话已经创建。继续提问，我会基于当前会话上下文实时回答。'
+    )
   ]
   inputValue.value = ''
-  isStreaming.value = false
   errorText.value = ''
+  renderWindowSize.value = DEFAULT_RENDER_WINDOW
+  shouldAutoScroll.value = true
+  resetStreamState()
+  nextTick(() => scheduleScroll(true))
 }
 
 function sendMessage() {
   const text = inputValue.value.trim()
-  if (!text || isStreaming.value) {
+  if (!text || isStreamBusy.value) {
     return
   }
 
   errorText.value = ''
   messages.value.push(createMessage('user', text))
 
-  const assistantMessage = createMessage('assistant', '')
+  const assistantMessage = createMessage('assistant')
   messages.value.push(assistantMessage)
-  const assistantIndex = messages.value.length - 1
+  activeAssistantMessageId.value = assistantMessage.id
 
   inputValue.value = ''
-  isStreaming.value = true
-  scrollToBottom()
+  connectionState.value = 'connecting'
+  shouldAutoScroll.value = true
 
   closeStream()
+  scheduleScroll(true)
+
   const stream = new EventSource(buildChatStreamUrl(memoryId.value, text))
   currentStream.value = stream
 
+  stream.onopen = () => {
+    connectionState.value = 'streaming'
+    scheduleScroll(true)
+  }
+
   stream.onmessage = (event) => {
-    messages.value[assistantIndex].content += event.data
-    scrollToBottom()
+    if (event.data === '[DONE]') {
+      finishStream(assistantMessage)
+      return
+    }
+
+    queueMessageChunk(assistantMessage.id, event.data)
   }
 
   stream.onerror = () => {
-    closeStream()
-    isStreaming.value = false
-
-    if (!messages.value[assistantIndex].content.trim()) {
-      messages.value[assistantIndex].content =
-        '本次流式响应已中断，请检查后端服务、CORS 配置和接口编码设置。'
-    }
-
-    scrollToBottom()
+    finishStream(assistantMessage, true)
   }
 }
 
@@ -131,50 +256,116 @@ function handleKeydown(event) {
   }
 }
 
-onMounted(scrollToBottom)
-onBeforeUnmount(closeStream)
+function handleMessageListScroll(event) {
+  shouldAutoScroll.value = isAtBottom(event.target)
+}
+
+function handleRendererRender() {
+  scheduleScroll(false)
+}
+
+function expandHistory() {
+  renderWindowSize.value += DEFAULT_RENDER_WINDOW
+  nextTick(() => scheduleScroll(false))
+}
+
+function isTypingMessage(message) {
+  return (
+    message.role === 'assistant' &&
+    message.id === activeAssistantMessageId.value &&
+    isStreamBusy.value &&
+    !message.content
+  )
+}
+
+onMounted(() => {
+  nextTick(() => scheduleScroll(true))
+})
+
+onBeforeUnmount(() => {
+  closeStream()
+  clearStreamTimers()
+  rendererRegistry.clear()
+  streamChunkRegistry.clear()
+  pendingMessageIds.clear()
+})
 </script>
 
 <template>
   <div class="page-shell">
     <main class="chat-card">
       <header class="hero">
-        <div>
-          <p class="eyebrow">AI Programming Copilot</p>
+        <div class="hero-copy">
+          <p class="eyebrow">Interview Coach Mode</p>
           <h1>AI 编程小助手</h1>
           <p class="subtitle">
-            帮你拆解编程学习路径、项目实战方案和求职面试问题。
+            使用 SSE 流式输出，针对技术答疑和面试辅导场景优化 Markdown、代码块和阅读体验。
           </p>
         </div>
+
         <div class="session-panel">
           <span class="session-label">当前会话 ID</span>
           <strong class="session-id">{{ memoryId }}</strong>
+          <span class="status-pill" :class="connectionStatus.tone">
+            {{ connectionStatus.label }}
+          </span>
           <button class="ghost-button" type="button" @click="resetChat">
             新建会话
           </button>
         </div>
       </header>
 
-      <section ref="messageListRef" class="message-list">
+      <section
+        ref="messageListRef"
+        class="message-list"
+        @scroll="handleMessageListScroll"
+      >
+        <button
+          v-if="hiddenMessageCount"
+          class="history-chip"
+          type="button"
+          @click="expandHistory"
+        >
+          查看更早的 {{ hiddenMessageCount }} 条消息
+        </button>
+
         <article
-          v-for="message in messages"
+          v-for="message in visibleMessages"
           :key="message.id"
           class="message-row"
           :class="message.role"
         >
           <div class="avatar">
-            {{ message.role === 'assistant' ? 'AI' : '我' }}
+            {{ message.role === 'assistant' ? 'AI' : '你' }}
           </div>
+
           <div class="bubble">
             <span class="role-tag">
-              {{ message.role === 'assistant' ? 'AI 编程小助手' : '用户' }}
+              {{ message.role === 'assistant' ? 'AI 回答' : '我的提问' }}
             </span>
-            <div
+
+            <MarkdownRenderer
               v-if="message.role === 'assistant'"
+              :ref="(instance) => bindRendererRef(message.id, instance)"
               class="message-markdown"
-              v-html="renderMessage(message.content || '...')"
+              :content="message.content"
+              :streaming="message.id === activeAssistantMessageId && isStreamBusy"
+              @render="handleRendererRender"
             />
-            <p v-else>{{ message.content || '...' }}</p>
+
+            <p v-else class="plain-text">
+              {{ message.content }}
+            </p>
+
+            <div
+              v-if="isTypingMessage(message)"
+              class="typing-indicator"
+              aria-label="AI 正在回复"
+            >
+              <span />
+              <span />
+              <span />
+            </div>
           </div>
         </article>
       </section>
@@ -186,13 +377,19 @@ onBeforeUnmount(closeStream)
           v-model="inputValue"
           class="composer-input"
           rows="3"
-          placeholder="输入你的编程学习、项目实战或面试相关问题"
+          placeholder="输入编程学习、项目实战或面试辅导问题"
           @keydown="handleKeydown"
         />
+
         <div class="composer-actions">
           <span class="hint">
-            {{ isStreaming ? 'AI 正在实时回复...' : 'Enter 发送，Shift + Enter 换行' }}
+            {{
+              isStreamBusy
+                ? '消息以增量方式写入渲染器，避免 v-html 全量重建。'
+                : 'Enter 发送，Shift + Enter 换行。'
+            }}
           </span>
+
           <button
             class="send-button"
             type="button"
